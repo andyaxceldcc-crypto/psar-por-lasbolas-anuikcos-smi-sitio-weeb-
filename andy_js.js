@@ -1,13 +1,10 @@
+name=andy_js.js
 (function () {
     'use strict';
 
     // =========================================================
     // ANDY.JS - VERSIÓN MAESTRA ULTRA AMPLIADA Y EXTENDIDA
     // ANUNCIOS PARA SITIOS CON EMBEDS / IFRAMES Y MÁS
-    // =========================================================
-
-    // =========================================================
-    // 50 FUENTES / PROVEEDORES DE ANUNCIOS
     // =========================================================
 
     const AD_SOURCES = [
@@ -63,18 +60,13 @@
         'https://URL-EMPRESA-50'
     ];
 
-    const MIN_INTERVAL = 1000;
-
-    const MAX_ADS_PER_MINUTE = 60;
-
+    const MIN_INTERVAL = 60000; // Configurado a 1 minuto
+    const MAX_ADS_PER_MINUTE = 1;
     const WINDOW_MS = 60000;
 
     let lastFire = 0;
-
     let loading = false;
-
     let providerIndex = 0;
-
     const adTimestamps = [];
 
     // =========================================================
@@ -82,13 +74,10 @@
     // =========================================================
 
     let totalRequests = 0;
-
     let successfulLoads = 0;
-
     let failedLoads = 0;
 
     const providerHits = new Array(AD_SOURCES.length).fill(0);
-
     const historyLog = [];
 
     function registrarLog(tipo, detalle) {
@@ -108,19 +97,15 @@
     // =========================================================
 
     function nextProvider() {
-
         if (!AD_SOURCES.length) {
             return null;
         }
 
         providerHits[providerIndex]++;
 
-        const url =
-            AD_SOURCES[providerIndex];
+        const url = AD_SOURCES[providerIndex];
 
-        providerIndex =
-            (providerIndex + 1) %
-            AD_SOURCES.length;
+        providerIndex = (providerIndex + 1) % AD_SOURCES.length;
 
         return url;
     }
@@ -130,13 +115,11 @@
     // =========================================================
 
     function canLoadAd() {
-
         const now = Date.now();
 
         while (
             adTimestamps.length &&
-            adTimestamps[0] <
-            now - WINDOW_MS
+            adTimestamps[0] < now - WINDOW_MS
         ) {
             adTimestamps.shift();
         }
@@ -164,7 +147,6 @@
     // =========================================================
 
     function loadAd() {
-
         try {
             if (!canLoadAd()) {
                 return;
@@ -174,24 +156,17 @@
                 return;
             }
 
-            const adUrl =
-                nextProvider();
+            const adUrl = nextProvider();
 
             if (!adUrl) {
                 return;
             }
 
             loading = true;
-
             totalRequests++;
 
-            const script =
-                document.createElement('script');
-
-            const separator =
-                adUrl.includes('?')
-                    ? '&'
-                    : '?';
+            const script = document.createElement('script');
+            const separator = adUrl.includes('?') ? '&' : '?';
 
             script.src =
                 adUrl +
@@ -202,7 +177,6 @@
 
             script.async = true;
 
-            // Función para limpiar el script del navegador y no saturar memoria
             const limpiarScriptDOM = function () {
                 try {
                     loading = false;
@@ -215,31 +189,20 @@
             };
 
             script.onload = function () {
-
                 limpiarScriptDOM();
-
                 lastFire = Date.now();
-
                 adTimestamps.push(lastFire);
-
                 successfulLoads++;
-
                 registrarLog('EXITO', adUrl);
-
                 console.log(
                     '[Andy.js] Anuncio cargado, procesado y limpiado correctamente desde la fuente indexada'
                 );
-
             };
 
             script.onerror = function () {
-
                 limpiarScriptDOM();
-
                 failedLoads++;
-
                 registrarLog('ERROR', adUrl);
-
                 console.warn(
                     '[Andy.js] El proveedor no respondió, dio error 404/500 o hay un AdBlock activo detectado'
                 );
@@ -277,13 +240,9 @@
     document.addEventListener(
         'visibilitychange',
         function () {
-
             if (!document.hidden) {
-
                 loadAd();
-
             }
-
         }
     );
 
@@ -292,18 +251,15 @@
     // =========================================================
 
     function detectEmbeds() {
-
-        const frames =
-            document.querySelectorAll(
-                'iframe, embed, object, video'
-            );
+        const frames = document.querySelectorAll(
+            'iframe, embed, object, video'
+        );
 
         if (!frames.length) {
             return;
         }
 
         frames.forEach(function (frame) {
-
             if (!frame.dataset.andyTracked) {
                 frame.dataset.andyTracked = 'true';
                 frame.addEventListener(
@@ -317,7 +273,6 @@
                     }
                 );
             }
-
         });
     }
 
@@ -325,16 +280,15 @@
     // BUSCAR EMBEDS DESPUÉS DE CAMBIOS EN EL HTML (MUTATION OBSERVER)
     // =========================================================
 
-    const observer =
-        new MutationObserver(
-            function (mutationsList) {
-                for (let mutation of mutationsList) {
-                    if (mutation.addedNodes.length > 0) {
-                        detectEmbeds();
-                    }
+    const observer = new MutationObserver(
+        function (mutationsList) {
+            for (let mutation of mutationsList) {
+                if (mutation.addedNodes.length > 0) {
+                    detectEmbeds();
                 }
             }
-        );
+        }
+    );
 
     observer.observe(
         document.documentElement,
@@ -345,27 +299,22 @@
     );
 
     // =========================================================
-    // CARGA INICIAL Y BUCLE AUTOMÁTICO DE DISPARO
+    // CARGA INICIAL Y BUCLE AUTOMÁTICO DE DISPARO (CADA 1 MINUTO)
     // =========================================================
 
     setTimeout(
         function () {
-
             detectEmbeds();
-
             loadAd();
-
         },
         1000
     );
 
     setInterval(
         function () {
-
             loadAd();
-
         },
-        1000
+        60000
     );
 
     // =========================================================
@@ -373,23 +322,17 @@
     // =========================================================
 
     window.AndyAds = {
-
         load: loadAd,
 
         providers: function () {
-
             return AD_SOURCES.slice();
-
         },
 
         count: function () {
-
             return adTimestamps.length;
-
         },
 
         metrics: function () {
-
             return {
                 solicitudesTotales: totalRequests,
                 exitosos: successfulLoads,
@@ -400,17 +343,13 @@
                 cargandoActualmente: loading,
                 totalFuentesConfiguradas: AD_SOURCES.length
             };
-
         },
 
         logs: function () {
-
             return historyLog;
-
         },
 
         reset: function () {
-
             adTimestamps.length = 0;
             lastFire = 0;
             loading = false;
@@ -419,9 +358,7 @@
             failedLoads = 0;
             providerHits.fill(0);
             console.log('[Andy.js] Contadores y métricas restablecidos a cero');
-
         }
-
     };
 
     // =========================================================
@@ -429,7 +366,7 @@
     // =========================================================
 
     console.log(
-        '[Andy.js] Sistema maestro ultra extendido con 50 fuentes, observadores y eventos masivos iniciado al 100% sin omitir nada.'
+        '[Andy.js] Sistema maestro ultra extendido con 50 fuentes, observadores y eventos masivos iniciado al 100% (Intervalo de 1 minuto).'
     );
 
 })();
