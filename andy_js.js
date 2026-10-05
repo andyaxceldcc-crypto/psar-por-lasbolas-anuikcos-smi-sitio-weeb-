@@ -1,10 +1,10 @@
-name=andy_js.js
+
 (function () {
     'use strict';
 
     // =========================================================
-    // ANDY.JS - VERSIÓN MAESTRA ULTRA AMPLIADA Y EXTENDIDA
-    // ANUNCIOS PARA SITIOS CON EMBEDS / IFRAMES Y MÁS
+    // ANDY.JS
+    // SISTEMA DE ANUNCIOS AMPLIADO
     // =========================================================
 
     const AD_SOURCES = [
@@ -60,82 +60,184 @@ name=andy_js.js
         'https://URL-EMPRESA-50'
     ];
 
-    const MIN_INTERVAL = 60000; // Configurado a 1 minuto
-    const MAX_ADS_PER_MINUTE = 1;
-    const WINDOW_MS = 60000;
+    // =========================================================
+    // CONFIGURACIÓN
+    // =========================================================
+
+    const CONFIG = {
+
+        // Tiempo mínimo entre anuncios
+        MIN_INTERVAL: 60000,
+
+        // Máximo de solicitudes en una ventana
+        MAX_ADS_PER_MINUTE: 60,
+
+        // Ventana de control
+        WINDOW_MS: 60000,
+
+        // Primera carga
+        INITIAL_DELAY: 1500,
+
+        // Revisar elementos dinámicos
+        EMBED_SCAN_INTERVAL: 5000,
+
+        // Tiempo máximo que puede estar cargando
+        LOAD_TIMEOUT: 15000,
+
+        // Máximo de registros internos
+        MAX_LOGS: 300,
+
+        // Activar eventos
+        EVENTS: true,
+
+        // Activar detección de embeds
+        DETECT_EMBEDS: true,
+
+        // Activar cambios de URL
+        DETECT_URL_CHANGES: true,
+
+        // Activar Page Visibility API
+        VISIBILITY: true
+    };
+
+    // =========================================================
+    // VARIABLES PRINCIPALES
+    // =========================================================
 
     let lastFire = 0;
     let loading = false;
     let providerIndex = 0;
-    const adTimestamps = [];
-
-    // =========================================================
-    // MÉTRICAS Y LOGS INTERNOS COMPLETOS
-    // =========================================================
 
     let totalRequests = 0;
     let successfulLoads = 0;
     let failedLoads = 0;
 
-    const providerHits = new Array(AD_SOURCES.length).fill(0);
+    let pageLoads = 0;
+    let embedLoads = 0;
+    let interactionEvents = 0;
+    let navigationEvents = 0;
+
+    let lastUrl = location.href;
+
+    const adTimestamps = [];
     const historyLog = [];
 
+    const providerHits =
+        new Array(AD_SOURCES.length).fill(0);
+
+    // =========================================================
+    // LOG
+    // =========================================================
+
     function registrarLog(tipo, detalle) {
+
         historyLog.push({
             tiempo: new Date().toISOString(),
             tipo: tipo,
-            detalle: detalle
+            detalle: detalle,
+            url: location.href
         });
 
-        if (historyLog.length > 200) {
+        if (historyLog.length > CONFIG.MAX_LOGS) {
             historyLog.shift();
         }
     }
 
     // =========================================================
-    // OBTENER SIGUIENTE PROVEEDOR (ROTACIÓN AVANZADA)
+    // EVENTO PERSONALIZADO
+    // =========================================================
+
+    function emitirEvento(nombre, detalle) {
+
+        try {
+
+            window.dispatchEvent(
+                new CustomEvent(nombre, {
+                    detail: detalle || {}
+                })
+            );
+
+        } catch (error) {
+
+            console.warn(
+                '[Andy.js] No se pudo emitir evento:',
+                nombre
+            );
+
+        }
+    }
+
+    // =========================================================
+    // OBTENER PROVEEDOR
     // =========================================================
 
     function nextProvider() {
+
         if (!AD_SOURCES.length) {
             return null;
         }
 
-        providerHits[providerIndex]++;
+        const indice = providerIndex;
 
-        const url = AD_SOURCES[providerIndex];
+        providerHits[indice]++;
 
-        providerIndex = (providerIndex + 1) % AD_SOURCES.length;
+        const url = AD_SOURCES[indice];
+
+        providerIndex =
+            (providerIndex + 1) %
+            AD_SOURCES.length;
 
         return url;
     }
 
     // =========================================================
-    // COMPROBAR LÍMITE DE VELOCIDAD Y VENTANA DE TIEMPO
+    // LIMPIAR TIMESTAMPS
     // =========================================================
 
-    function canLoadAd() {
-        const now = Date.now();
+    function limpiarTimestamps() {
+
+        const ahora = Date.now();
 
         while (
             adTimestamps.length &&
-            adTimestamps[0] < now - WINDOW_MS
+            adTimestamps[0] <
+            ahora - CONFIG.WINDOW_MS
         ) {
             adTimestamps.shift();
         }
+    }
+
+    // =========================================================
+    // CONTROL DE CARGA
+    // =========================================================
+
+    function canLoadAd() {
+
+        limpiarTimestamps();
+
+        const ahora = Date.now();
 
         if (
             adTimestamps.length >=
-            MAX_ADS_PER_MINUTE
+            CONFIG.MAX_ADS_PER_MINUTE
         ) {
-            registrarLog('BLOQUEO', 'Límite máximo por minuto alcanzado');
+
+            registrarLog(
+                'BLOQUEO',
+                'Máximo de anuncios por ventana alcanzado'
+            );
+
             return false;
         }
 
         if (
-            now - lastFire <
-            MIN_INTERVAL
+            ahora - lastFire <
+            CONFIG.MIN_INTERVAL
         ) {
+            return false;
+        }
+
+        if (loading) {
             return false;
         }
 
@@ -143,230 +245,891 @@ name=andy_js.js
     }
 
     // =========================================================
-    // CARGAR ANUNCIO (CON LIMPIEZA DE DOM AUTOMÁTICA Y EXCEPCIONES)
+    // CREAR URL DE ANUNCIO
     // =========================================================
 
-    function loadAd() {
+    function construirAdUrl(url) {
+
+        const separador =
+            url.includes('?')
+                ? '&'
+                : '?';
+
+        return (
+            url +
+            separador +
+            '_=' +
+            Date.now() +
+            '&rand=' +
+            Math.random()
+                .toString(36)
+                .substring(2, 10)
+        );
+    }
+
+    // =========================================================
+    // CARGAR ANUNCIO
+    // =========================================================
+
+    function loadAd(motivo) {
+
         try {
+
             if (!canLoadAd()) {
-                return;
+                return false;
             }
 
-            if (loading) {
-                return;
-            }
-
-            const adUrl = nextProvider();
+            const adUrl =
+                nextProvider();
 
             if (!adUrl) {
-                return;
+                return false;
             }
 
             loading = true;
+
             totalRequests++;
 
-            const script = document.createElement('script');
-            const separator = adUrl.includes('?') ? '&' : '?';
+            registrarLog(
+                'SOLICITUD',
+                motivo || 'manual'
+            );
 
-            script.src =
-                adUrl +
-                separator +
-                '_=' +
-                Date.now() +
-                '&rand=' + Math.random().toString(36).substring(2, 10);
+            emitirEvento(
+                'andyads:beforeload',
+                {
+                    provider: adUrl,
+                    motivo: motivo || 'manual'
+                }
+            );
+
+            const script =
+                document.createElement('script');
 
             script.async = true;
 
-            const limpiarScriptDOM = function () {
-                try {
-                    loading = false;
-                    if (script && script.parentNode) {
-                        script.parentNode.removeChild(script);
-                    }
-                } catch (cleanErr) {
-                    console.error('[Andy.js] Error al limpiar script:', cleanErr);
+            script.src =
+                construirAdUrl(adUrl);
+
+            script.dataset.andyAds =
+                'true';
+
+            let terminado = false;
+
+            const finalizar = function (
+                exitoso
+            ) {
+
+                if (terminado) {
+                    return;
+                }
+
+                terminado = true;
+
+                loading = false;
+
+                if (script.parentNode) {
+                    script.parentNode.removeChild(script);
+                }
+
+                if (exitoso) {
+
+                    lastFire = Date.now();
+
+                    adTimestamps.push(
+                        lastFire
+                    );
+
+                    successfulLoads++;
+
+                    registrarLog(
+                        'EXITO',
+                        adUrl
+                    );
+
+                    emitirEvento(
+                        'andyads:success',
+                        {
+                            provider: adUrl
+                        }
+                    );
+
+                } else {
+
+                    failedLoads++;
+
+                    registrarLog(
+                        'ERROR',
+                        adUrl
+                    );
+
+                    emitirEvento(
+                        'andyads:error',
+                        {
+                            provider: adUrl
+                        }
+                    );
                 }
             };
 
             script.onload = function () {
-                limpiarScriptDOM();
-                lastFire = Date.now();
-                adTimestamps.push(lastFire);
-                successfulLoads++;
-                registrarLog('EXITO', adUrl);
+
+                finalizar(true);
+
                 console.log(
-                    '[Andy.js] Anuncio cargado, procesado y limpiado correctamente desde la fuente indexada'
+                    '[Andy.js] Anuncio cargado:',
+                    adUrl
                 );
             };
 
             script.onerror = function () {
-                limpiarScriptDOM();
-                failedLoads++;
-                registrarLog('ERROR', adUrl);
+
+                finalizar(false);
+
                 console.warn(
-                    '[Andy.js] El proveedor no respondió, dio error 404/500 o hay un AdBlock activo detectado'
+                    '[Andy.js] Error cargando proveedor:',
+                    adUrl
                 );
             };
 
-            document.head.appendChild(script);
+            document.head.appendChild(
+                script
+            );
 
-        } catch (err) {
+            // Protección contra scripts que quedan colgados
+            setTimeout(
+                function () {
+
+                    if (!terminado) {
+
+                        registrarLog(
+                            'TIMEOUT',
+                            adUrl
+                        );
+
+                        finalizar(false);
+                    }
+
+                },
+                CONFIG.LOAD_TIMEOUT
+            );
+
+            return true;
+
+        } catch (error) {
+
             loading = false;
-            console.error('[Andy.js] Excepción crítica capturada en loadAd:', err);
+
+            failedLoads++;
+
+            registrarLog(
+                'EXCEPCION',
+                error.message
+            );
+
+            console.error(
+                '[Andy.js]',
+                error
+            );
+
+            return false;
         }
     }
 
     // =========================================================
-    // EVENTOS DE INTERACCIÓN MASIVA AMPLIADOS
-    // =========================================================
-
-    ['click', 'touchstart', 'mousedown', 'keydown', 'scroll', 'mousemove', 'wheel', 'pointerdown', 'focus'].forEach(function(evento) {
-        document.addEventListener(
-            evento,
-            function () {
-                loadAd();
-            },
-            {
-                passive: true,
-                capture: true
-            }
-        );
-    });
-
-    // =========================================================
-    // CUANDO EL USUARIO REGRESA A LA PÁGINA O CAMBIA DE VISIBILIDAD
-    // =========================================================
-
-    document.addEventListener(
-        'visibilitychange',
-        function () {
-            if (!document.hidden) {
-                loadAd();
-            }
-        }
-    );
-
-    // =========================================================
-    // DETECTAR IFRAMES / EMBEDS / OBJETOS DINÁMICOS
+    // DETECCIÓN DE IFRAMES / VIDEO / EMBEDS
     // =========================================================
 
     function detectEmbeds() {
-        const frames = document.querySelectorAll(
-            'iframe, embed, object, video'
-        );
 
-        if (!frames.length) {
+        if (!CONFIG.DETECT_EMBEDS) {
             return;
         }
 
-        frames.forEach(function (frame) {
-            if (!frame.dataset.andyTracked) {
-                frame.dataset.andyTracked = 'true';
-                frame.addEventListener(
+        const elementos =
+            document.querySelectorAll(
+                'iframe, embed, object, video, audio'
+            );
+
+        elementos.forEach(
+            function (elemento) {
+
+                if (
+                    elemento.dataset.andyTracked
+                ) {
+                    return;
+                }
+
+                elemento.dataset.andyTracked =
+                    'true';
+
+                elemento.addEventListener(
                     'load',
                     function () {
-                        console.log(
-                            '[Andy.js] Elemento embed detectado y cargado exitosamente:',
-                            frame.src || frame.data || 'recurso multimedia'
+
+                        embedLoads++;
+
+                        registrarLog(
+                            'EMBED_LOAD',
+                            elemento.src ||
+                            elemento.currentSrc ||
+                            elemento.data ||
+                            'multimedia'
                         );
-                        loadAd();
+
+                        emitirEvento(
+                            'andyads:embed',
+                            {
+                                elemento: elemento
+                            }
+                        );
+
+                        loadAd(
+                            'embed-load'
+                        );
+                    }
+                );
+
+                // Para video/audio
+                elemento.addEventListener(
+                    'play',
+                    function () {
+
+                        registrarLog(
+                            'MEDIA_PLAY',
+                            elemento.currentSrc ||
+                            elemento.src ||
+                            'media'
+                        );
+
+                        emitirEvento(
+                            'andyads:media-play'
+                        );
+
+                        loadAd(
+                            'media-play'
+                        );
+                    }
+                );
+
+                elemento.addEventListener(
+                    'pause',
+                    function () {
+
+                        emitirEvento(
+                            'andyads:media-pause'
+                        );
                     }
                 );
             }
-        });
+        );
     }
 
     // =========================================================
-    // BUSCAR EMBEDS DESPUÉS DE CAMBIOS EN EL HTML (MUTATION OBSERVER)
+    // OBSERVADOR DEL DOM
     // =========================================================
 
-    const observer = new MutationObserver(
-        function (mutationsList) {
-            for (let mutation of mutationsList) {
-                if (mutation.addedNodes.length > 0) {
-                    detectEmbeds();
+    let observer = null;
+
+    function iniciarObserver() {
+
+        if (!window.MutationObserver) {
+            return;
+        }
+
+        observer =
+            new MutationObserver(
+                function (mutations) {
+
+                    let huboCambios = false;
+
+                    for (
+                        const mutation
+                        of mutations
+                    ) {
+
+                        if (
+                            mutation.addedNodes &&
+                            mutation.addedNodes.length
+                        ) {
+
+                            huboCambios = true;
+                            break;
+                        }
+                    }
+
+                    if (huboCambios) {
+                        detectEmbeds();
+                    }
+                }
+            );
+
+        observer.observe(
+            document.documentElement,
+            {
+                childList: true,
+                subtree: true
+            }
+        );
+    }
+
+    // =========================================================
+    // DETECTAR CAMBIOS DE URL
+    // =========================================================
+
+    function comprobarUrl() {
+
+        if (!CONFIG.DETECT_URL_CHANGES) {
+            return;
+        }
+
+        const nuevaUrl =
+            location.href;
+
+        if (nuevaUrl === lastUrl) {
+            return;
+        }
+
+        const anterior =
+            lastUrl;
+
+        lastUrl =
+            nuevaUrl;
+
+        navigationEvents++;
+
+        registrarLog(
+            'NAVEGACION',
+            nuevaUrl
+        );
+
+        emitirEvento(
+            'andyads:navigation',
+            {
+                anterior: anterior,
+                nueva: nuevaUrl
+            }
+        );
+
+        detectEmbeds();
+
+        loadAd(
+            'navigation'
+        );
+    }
+
+    // =========================================================
+    // INTERCEPTAR HISTORY API
+    // =========================================================
+
+    function interceptarHistory() {
+
+        const pushStateOriginal =
+            history.pushState;
+
+        const replaceStateOriginal =
+            history.replaceState;
+
+        history.pushState =
+            function () {
+
+                const resultado =
+                    pushStateOriginal.apply(
+                        this,
+                        arguments
+                    );
+
+                setTimeout(
+                    comprobarUrl,
+                    50
+                );
+
+                return resultado;
+            };
+
+        history.replaceState =
+            function () {
+
+                const resultado =
+                    replaceStateOriginal.apply(
+                        this,
+                        arguments
+                    );
+
+                setTimeout(
+                    comprobarUrl,
+                    50
+                );
+
+                return resultado;
+            };
+
+        window.addEventListener(
+            'popstate',
+            comprobarUrl
+        );
+
+        window.addEventListener(
+            'hashchange',
+            comprobarUrl
+        );
+    }
+
+    // =========================================================
+    // EVENTOS DEL USUARIO
+    // =========================================================
+
+    function iniciarEventos() {
+
+        if (!CONFIG.EVENTS) {
+            return;
+        }
+
+        const eventos = [
+
+            'click',
+            'touchstart',
+            'mousedown',
+            'pointerdown',
+            'keydown',
+            'wheel',
+            'scroll',
+            'focus'
+
+        ];
+
+        eventos.forEach(
+            function (evento) {
+
+                document.addEventListener(
+                    evento,
+                    function () {
+
+                        interactionEvents++;
+
+                        emitirEvento(
+                            'andyads:interaction',
+                            {
+                                tipo: evento
+                            }
+                        );
+
+                        loadAd(
+                            'interaction-' +
+                            evento
+                        );
+
+                    },
+                    {
+                        passive: true,
+                        capture: true
+                    }
+                );
+
+            }
+        );
+    }
+
+    // =========================================================
+    // VISIBILIDAD DE PÁGINA
+    // =========================================================
+
+    function iniciarVisibility() {
+
+        if (!CONFIG.VISIBILITY) {
+            return;
+        }
+
+        document.addEventListener(
+            'visibilitychange',
+            function () {
+
+                if (
+                    !document.hidden
+                ) {
+
+                    registrarLog(
+                        'VISIBILITY',
+                        'Página visible'
+                    );
+
+                    emitirEvento(
+                        'andyads:visible'
+                    );
+
+                    loadAd(
+                        'visibility'
+                    );
                 }
             }
+        );
+    }
+
+    // =========================================================
+    // PAGE SHOW
+    // =========================================================
+
+    window.addEventListener(
+        'pageshow',
+        function () {
+
+            pageLoads++;
+
+            registrarLog(
+                'PAGESHOW',
+                'Página restaurada/mostrada'
+            );
+
+            loadAd(
+                'pageshow'
+            );
+
         }
     );
 
-    observer.observe(
-        document.documentElement,
-        {
-            childList: true,
-            subtree: true
+    // =========================================================
+    // PAGE HIDE
+    // =========================================================
+
+    window.addEventListener(
+        'pagehide',
+        function () {
+
+            emitirEvento(
+                'andyads:pagehide'
+            );
+
         }
     );
 
     // =========================================================
-    // CARGA INICIAL Y BUCLE AUTOMÁTICO DE DISPARO (CADA 1 MINUTO)
+    // REVISIÓN PERIÓDICA DE EMBEDS
     // =========================================================
 
-    setTimeout(
-        function () {
-            detectEmbeds();
-            loadAd();
-        },
-        1000
-    );
+    let embedInterval = null;
 
-    setInterval(
-        function () {
-            loadAd();
-        },
-        60000
-    );
+    function iniciarEscaneo() {
+
+        embedInterval =
+            setInterval(
+                function () {
+
+                    detectEmbeds();
+                    comprobarUrl();
+
+                },
+                CONFIG.EMBED_SCAN_INTERVAL
+            );
+    }
 
     // =========================================================
-    // API PARA DEPURAR (CON CONTROL TOTAL Y MÉTRICAS DESDE CONSOLA)
+    // API PÚBLICA
     // =========================================================
 
     window.AndyAds = {
-        load: loadAd,
+
+        // -----------------------------------------------------
+        // CARGAR MANUALMENTE
+        // -----------------------------------------------------
+
+        load: function () {
+            return loadAd(
+                'api-manual'
+            );
+        },
+
+        // -----------------------------------------------------
+        // LISTA DE PROVEEDORES
+        // -----------------------------------------------------
 
         providers: function () {
+
             return AD_SOURCES.slice();
+
         },
+
+        // -----------------------------------------------------
+        // PROVEEDOR ACTUAL
+        // -----------------------------------------------------
+
+        currentProvider: function () {
+
+            if (!AD_SOURCES.length) {
+                return null;
+            }
+
+            return AD_SOURCES[
+                providerIndex
+            ];
+
+        },
+
+        // -----------------------------------------------------
+        // CONTADOR DE ANUNCIOS
+        // -----------------------------------------------------
 
         count: function () {
+
+            limpiarTimestamps();
+
             return adTimestamps.length;
+
         },
+
+        // -----------------------------------------------------
+        // MÉTRICAS
+        // -----------------------------------------------------
 
         metrics: function () {
+
             return {
-                solicitudesTotales: totalRequests,
-                exitosos: successfulLoads,
-                fallidos: failedLoads,
-                tasaDeExito: totalRequests > 0 ? ((successfulLoads / totalRequests) * 100).toFixed(2) + '%' : '0%',
-                hitsPorProveedor: providerHits,
-                indiceActual: providerIndex,
-                cargandoActualmente: loading,
-                totalFuentesConfiguradas: AD_SOURCES.length
+
+                solicitudesTotales:
+                    totalRequests,
+
+                exitosos:
+                    successfulLoads,
+
+                fallidos:
+                    failedLoads,
+
+                tasaDeExito:
+                    totalRequests > 0
+                        ? (
+                            (
+                                successfulLoads /
+                                totalRequests
+                            ) * 100
+                        ).toFixed(2) + '%'
+                        : '0%',
+
+                hitsPorProveedor:
+                    providerHits.slice(),
+
+                indiceActual:
+                    providerIndex,
+
+                cargandoActualmente:
+                    loading,
+
+                totalFuentesConfiguradas:
+                    AD_SOURCES.length,
+
+                embedsDetectados:
+                    embedLoads,
+
+                interacciones:
+                    interactionEvents,
+
+                navegaciones:
+                    navigationEvents,
+
+                cargasPagina:
+                    pageLoads,
+
+                urlActual:
+                    location.href
+
             };
+
         },
+
+        // -----------------------------------------------------
+        // LOGS
+        // -----------------------------------------------------
 
         logs: function () {
-            return historyLog;
+
+            return historyLog.slice();
+
         },
 
+        // -----------------------------------------------------
+        // ÚLTIMA URL
+        // -----------------------------------------------------
+
+        url: function () {
+
+            return location.href;
+
+        },
+
+        // -----------------------------------------------------
+        // ESTADO
+        // -----------------------------------------------------
+
+        status: function () {
+
+            return {
+
+                loading: loading,
+
+                ultimoDisparo:
+                    lastFire,
+
+                proveedor:
+                    this.currentProvider(),
+
+                anunciosVentana:
+                    this.count()
+
+            };
+
+        },
+
+        // -----------------------------------------------------
+        // REESCANEAR EMBEDS
+        // -----------------------------------------------------
+
+        scan: function () {
+
+            detectEmbeds();
+
+            return true;
+
+        },
+
+        // -----------------------------------------------------
+        // RESET
+        // -----------------------------------------------------
+
         reset: function () {
+
             adTimestamps.length = 0;
+
+            historyLog.length = 0;
+
             lastFire = 0;
+
             loading = false;
+
             totalRequests = 0;
+
             successfulLoads = 0;
+
             failedLoads = 0;
+
+            pageLoads = 0;
+
+            embedLoads = 0;
+
+            interactionEvents = 0;
+
+            navigationEvents = 0;
+
+            providerIndex = 0;
+
             providerHits.fill(0);
-            console.log('[Andy.js] Contadores y métricas restablecidos a cero');
+
+            registrarLog(
+                'RESET',
+                'Sistema reiniciado'
+            );
+
+            console.log(
+                '[Andy.js] Sistema reiniciado'
+            );
+
+        },
+
+        // -----------------------------------------------------
+        // CONFIGURACIÓN DE SOLO LECTURA
+        // -----------------------------------------------------
+
+        config: function () {
+
+            return Object.assign(
+                {},
+                CONFIG
+            );
+
         }
+
     };
 
     // =========================================================
-    // MENSAJE DE INICIO CONSOLA
+    // INICIO
     // =========================================================
 
-    console.log(
-        '[Andy.js] Sistema maestro ultra extendido con 50 fuentes, observadores y eventos masivos iniciado al 100% (Intervalo de 1 minuto).'
-    );
+    function iniciarAndyAds() {
+
+        console.log(
+            '[Andy.js] Inicializando sistema...'
+        );
+
+        registrarLog(
+            'START',
+            'AndyAds iniciado'
+        );
+
+        iniciarEventos();
+
+        iniciarVisibility();
+
+        interceptarHistory();
+
+        iniciarObserver();
+
+        iniciarEscaneo();
+
+        detectEmbeds();
+
+        // Primera carga
+        setTimeout(
+            function () {
+
+                loadAd(
+                    'initial'
+                );
+
+            },
+            CONFIG.INITIAL_DELAY
+        );
+
+        // Disparo periódico
+        setInterval(
+            function () {
+
+                loadAd(
+                    'interval'
+                );
+
+            },
+            CONFIG.MIN_INTERVAL
+        );
+
+        emitirEvento(
+            'andyads:ready'
+        );
+
+        console.log(
+            '[Andy.js] Sistema iniciado correctamente.'
+        );
+
+    }
+
+    // =========================================================
+    // ESPERAR DOM
+    // =========================================================
+
+    if (
+        document.readyState ===
+        'loading'
+    ) {
+
+        document.addEventListener(
+            'DOMContentLoaded',
+            iniciarAndyAds,
+            {
+                once: true
+            }
+        );
+
+    } else {
+
+        iniciarAndyAds();
+
+    }
 
 })();
+
